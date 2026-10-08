@@ -12,8 +12,8 @@ A fast-paced 3D cyberpunk infinite runner game built with **Godot Engine 4.6**. 
   - Endless highway chunks dynamically spawning overhead tech arches, holographic city billboards, street lamps, and flying traffic speeders.
   - Balanced starlight key lighting and 4K deep space nebula skybox.
 - **Dynamic Obstacle System**:
-  - **Low Hurdle**: Amber plasma hurdle requiring a clean jump (`[SPACE]`).
-  - **High Laser Gate**: Crimson energy gate requiring an under-slide (`[S]`).
+  - **Low Hurdle**: Red security laser rail with a 3D brick wall inside requiring a clean jump (`[SPACE]`).
+  - **High Laser Gate**: Glowing purple laser gate with an octagonal STOP sign requiring an under-slide (`[S]`).
   - **Solid Reinforced Barrier**: High-security barrier requiring a lane switch.
   - *Guaranteed Path*: Every obstacle checkpoint always guarantees at least one safe, open path.
 - **Power-Ups & Economy**:
