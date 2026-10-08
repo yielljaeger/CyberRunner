@@ -1,6 +1,7 @@
 extends Node
 
 const AssetLoader = preload("res://scripts/asset_loader.gd")
+const AudioManagerScript = preload("res://scripts/audio_manager.gd")
 
 @onready var world_env: WorldEnvironment = $WorldEnvironment
 @onready var dir_light: DirectionalLight3D = $DirectionalLight
@@ -9,11 +10,18 @@ const AssetLoader = preload("res://scripts/asset_loader.gd")
 @onready var track_spawner: Node3D = $TrackSpawner
 @onready var hud: CanvasLayer = $HUD
 
+var audio_manager: Node = null
 var is_game_over: bool = false
 
 func _ready() -> void:
+	_setup_audio_system()
 	_setup_cyber_environment()
 	_connect_signals()
+
+func _setup_audio_system() -> void:
+	audio_manager = AudioManagerScript.new()
+	audio_manager.name = "AudioManager"
+	add_child(audio_manager)
 
 func _setup_cyber_environment() -> void:
 	# 1. Clean Starlight Directional Key Light
@@ -76,6 +84,7 @@ func _setup_cyber_environment() -> void:
 		world_env.environment = env
 
 func _connect_signals() -> void:
+	# HUD signal connections
 	if player and hud:
 		if player.has_signal("speed_updated") and hud.has_method("update_speed"):
 			player.connect("speed_updated", Callable(hud, "update_speed"))
@@ -96,6 +105,27 @@ func _connect_signals() -> void:
 		if player.has_signal("crashed"):
 			player.connect("crashed", Callable(self, "_on_player_crashed"))
 
+	# Audio Manager signal connections
+	if player and audio_manager:
+		if player.has_signal("jumped"):
+			player.connect("jumped", Callable(audio_manager, "on_jump"))
+		if player.has_signal("slid"):
+			player.connect("slid", Callable(audio_manager, "on_slide_started"))
+		if player.has_signal("slide_ended"):
+			player.connect("slide_ended", Callable(audio_manager, "on_slide_ended"))
+		if player.has_signal("core_collected"):
+			player.connect("core_collected", Callable(audio_manager, "on_data_core_collected").unbind(1))
+		if player.has_signal("powerup_collected"):
+			player.connect("powerup_collected", Callable(audio_manager, "on_powerup_collected"))
+		if player.has_signal("shield_absorbed"):
+			player.connect("shield_absorbed", Callable(audio_manager, "on_shield_absorbed"))
+		if player.has_signal("obstacle_smashed"):
+			player.connect("obstacle_smashed", Callable(audio_manager, "on_obstacle_smashed"))
+		if player.has_signal("nitro_intensity_updated"):
+			player.connect("nitro_intensity_updated", Callable(audio_manager, "on_nitro_intensity"))
+		if player.has_signal("tier_updated"):
+			player.connect("tier_updated", Callable(audio_manager, "on_tier_updated"))
+
 func _unhandled_input(event: InputEvent) -> void:
 	if is_game_over:
 		if event.is_action_pressed("restart") or event.is_action_pressed("jump"):
@@ -103,6 +133,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_player_crashed() -> void:
 	is_game_over = true
+	if audio_manager and audio_manager.has_method("on_player_crashed"):
+		audio_manager.call("on_player_crashed")
+
 	if hud and hud.has_method("show_game_over"):
 		var dist: float = float(player.get("distance_traveled"))
 		var sc: int = int(player.get("score"))
@@ -111,4 +144,6 @@ func _on_player_crashed() -> void:
 		hud.call("show_game_over", dist, sc, cr, tr)
 
 func _restart_game() -> void:
+	if audio_manager and audio_manager.has_method("stop_all"):
+		audio_manager.call("stop_all")
 	get_tree().reload_current_scene()

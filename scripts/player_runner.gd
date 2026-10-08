@@ -9,12 +9,16 @@ const CollectibleScript = preload("res://scripts/collectible.gd")
 signal lane_changed(new_lane: int)
 signal jumped()
 signal slid()
+signal slide_ended()
 signal speed_updated(new_speed: float)
 signal boost_state_changed(is_boosting: bool)
 signal nitro_intensity_updated(factor: float)
 signal distance_updated(meters: float)
 signal score_updated(new_score: int)
 signal cores_updated(new_cores: int)
+signal core_collected(streak: int)
+signal powerup_collected(item_type: int)
+signal shield_absorbed()
 signal tier_updated(new_tier: int, multiplier: float)
 signal powerup_status_updated(shield: bool, overdrive_time: float, magnet_time: float)
 signal obstacle_smashed()
@@ -359,6 +363,7 @@ func _end_slide() -> void:
 		hurtbox_shape.position = Vector3(0, 0.85, 0)
 	if slide_spark_particles:
 		slide_spark_particles.emitting = false
+	slide_ended.emit()
 
 func _physics_process(delta: float) -> void:
 	if not is_alive:
@@ -513,6 +518,7 @@ func _handle_obstacle_collision(obs: Area3D) -> void:
 		if shield_bubble:
 			shield_bubble.visible = false
 		powerup_status_updated.emit(has_shield, overdrive_timer, magnet_timer)
+		shield_absorbed.emit()
 		if obs.has_method("smash"):
 			obs.smash()
 	else:
@@ -528,15 +534,19 @@ func _handle_collectible_collision(item: Area3D) -> void:
 			score += int(150 * difficulty_multiplier)
 			cores_updated.emit(cores_collected)
 			score_updated.emit(score)
+			core_collected.emit(cores_collected)
 			item.collect()
 		CollectibleScript.CollectibleType.SHIELD:
 			activate_shield()
+			powerup_collected.emit(int(item.item_type))
 			item.collect()
 		CollectibleScript.CollectibleType.OVERDRIVE:
 			activate_overdrive(6.0)
+			powerup_collected.emit(int(item.item_type))
 			item.collect()
 		CollectibleScript.CollectibleType.MAGNET:
 			activate_magnet(8.0)
+			powerup_collected.emit(int(item.item_type))
 			item.collect()
 
 func _update_nitrous_thrusters(delta: float, factor: float) -> void:
