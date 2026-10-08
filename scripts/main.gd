@@ -81,6 +81,8 @@ func _connect_signals() -> void:
 			player.connect("speed_updated", Callable(hud, "update_speed"))
 		if player.has_signal("boost_state_changed") and hud.has_method("set_boosting"):
 			player.connect("boost_state_changed", Callable(hud, "set_boosting"))
+		if player.has_signal("nitro_intensity_updated") and hud.has_method("set_nitro_intensity"):
+			player.connect("nitro_intensity_updated", Callable(hud, "set_nitro_intensity"))
 		if player.has_signal("distance_updated") and hud.has_method("update_distance"):
 			player.connect("distance_updated", Callable(hud, "update_distance"))
 		if player.has_signal("crashed"):

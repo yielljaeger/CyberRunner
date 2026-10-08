@@ -5,8 +5,17 @@ var distance_label: Label
 var speed_label: Label
 var status_label: Label
 var controls_label: Label
+var nitro_gauge_label: Label
 var game_over_panel: PanelContainer
 var game_over_stats_label: Label
+
+var nitro_overlay: ColorRect
+var nitro_material: ShaderMaterial
+
+var is_boosting: bool = false
+var cached_speed: float = 24.0
+var target_nitro_intensity: float = 0.0
+var current_nitro_intensity: float = 0.0
 
 func _ready() -> void:
 	layer = 10
@@ -17,6 +26,53 @@ func _build_ui() -> void:
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
+
+	# Full-Screen Nitrous Radial Speed Lines & Warp Vignette Overlay
+	nitro_overlay = ColorRect.new()
+	nitro_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	nitro_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var shader := Shader.new()
+	shader.code = """
+shader_type canvas_item;
+
+uniform float nitro_intensity : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 nitro_color : source_color = vec4(0.0, 0.88, 1.0, 1.0);
+
+float hash(float n) {
+	return fract(sin(n) * 43758.5453123);
+}
+
+void fragment() {
+	if (nitro_intensity <= 0.001) {
+		COLOR = vec4(0.0);
+	} else {
+		vec2 uv = UV - vec2(0.5, 0.5);
+		uv.x *= 1.777;
+		float dist = length(uv);
+		float angle = atan(uv.y, uv.x);
+		
+		float ray_count = 72.0;
+		float ray_id = floor((angle + 3.14159265) / 6.2831853 * ray_count);
+		float rand_val = hash(ray_id + floor(TIME * 28.0));
+		
+		float is_ray = step(0.68, rand_val);
+		// Keep the center running view wide open and unobstructed
+		float streak = smoothstep(0.38, 0.88, dist) * is_ray;
+		float vignette = smoothstep(0.42, 0.95, dist) * 0.22;
+		
+		// Scaled down to 50% visibility - subtle peripheral speed lines that do not block vision
+		float total_alpha = clamp((streak * 0.40 + vignette) * nitro_intensity * 0.50, 0.0, 0.38);
+		vec3 col = mix(nitro_color.rgb, vec3(0.92, 0.98, 1.0), streak * 0.50);
+		COLOR = vec4(col, total_alpha);
+	}
+}
+"""
+	nitro_material = ShaderMaterial.new()
+	nitro_material.shader = shader
+	nitro_material.set_shader_parameter("nitro_intensity", 0.0)
+	nitro_overlay.material = nitro_material
+	root.add_child(nitro_overlay)
 
 	# --- TOP HEADER BAR ---
 	var top_bar := HBoxContainer.new()
@@ -40,7 +96,15 @@ func _build_ui() -> void:
 	speed_label.add_theme_constant_override("shadow_offset_y", 2)
 	top_bar.add_child(speed_label)
 
-	# 2. Distance display (Center)
+	# 2. Nitrous Boost Gauge (Center-Left)
+	nitro_gauge_label = Label.new()
+	nitro_gauge_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nitro_gauge_label.text = "NITRO: [READY]"
+	nitro_gauge_label.add_theme_font_size_override("font_size", 18)
+	nitro_gauge_label.add_theme_color_override("font_color", Color(0.2, 0.85, 1.0, 0.7))
+	top_bar.add_child(nitro_gauge_label)
+
+	# 3. Distance display (Center)
 	distance_label = Label.new()
 	distance_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	distance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -52,7 +116,7 @@ func _build_ui() -> void:
 	distance_label.add_theme_constant_override("shadow_offset_y", 2)
 	top_bar.add_child(distance_label)
 
-	# 3. Status display (Right)
+	# 4. Status display (Right)
 	status_label = Label.new()
 	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -68,14 +132,12 @@ func _build_ui() -> void:
 	controls_label.offset_top = -60.0
 	controls_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	controls_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	controls_label.text = "[A / D] SWITCH LANE    |    [W] BOOST SPEED    |    [SPACE] JUMP    |    [S] SLIDE / DIVE    |    [R] RESTART"
+	controls_label.text = "[A / D] SWITCH LANE    |    [W] NITROUS BOOST    |    [SPACE] JUMP    |    [S] SLIDE / DIVE    |    [R] RESTART"
 	controls_label.add_theme_font_size_override("font_size", 16)
 	controls_label.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0, 0.85))
 	controls_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.1, 0.3, 0.9))
 	controls_label.add_theme_constant_override("shadow_offset_x", 1)
 	controls_label.add_theme_constant_override("shadow_offset_y", 1)
-	root.add_child(controls_label)
-
 	# --- GAME OVER OVERLAY ---
 	game_over_panel = PanelContainer.new()
 	game_over_panel.set_anchors_preset(Control.PRESET_CENTER)
@@ -127,8 +189,24 @@ func _build_ui() -> void:
 
 	root.add_child(game_over_panel)
 
-var is_boosting: bool = false
-var cached_speed: float = 24.0
+func _process(delta: float) -> void:
+	current_nitro_intensity = lerp(current_nitro_intensity, target_nitro_intensity, delta * 14.0)
+
+	if nitro_material:
+		nitro_material.set_shader_parameter("nitro_intensity", current_nitro_intensity)
+
+	if nitro_gauge_label:
+		if current_nitro_intensity > 0.05:
+			var bars: int = clampi(int(round(current_nitro_intensity * 10.0)), 1, 10)
+			var bar_str: String = "N₂O: [" + "=".repeat(bars) + " ".repeat(10 - bars) + "]"
+			nitro_gauge_label.text = bar_str
+			nitro_gauge_label.add_theme_color_override("font_color", Color(0.0, 1.0, 1.0, 1.0))
+		else:
+			nitro_gauge_label.text = "N₂O: [READY]"
+			nitro_gauge_label.add_theme_color_override("font_color", Color(0.2, 0.85, 1.0, 0.65))
+
+func set_nitro_intensity(factor: float) -> void:
+	target_nitro_intensity = factor
 
 func set_boosting(boosting: bool) -> void:
 	is_boosting = boosting
@@ -143,10 +221,10 @@ func _refresh_speed_display() -> void:
 		return
 	var kmh: int = int(cached_speed * 3.6)
 	if is_boosting:
-		speed_label.text = "SPEED: %03d KM/H  [BOOST]" % kmh
+		speed_label.text = "SPEED: %03d KM/H  [NITROUS]" % kmh
 		speed_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 		if status_label:
-			status_label.text = "SYS: OVERDRIVE [W]"
+			status_label.text = "SYS: NITRO OVERDRIVE [W]"
 			status_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
 	else:
 		speed_label.text = "SPEED: %03d KM/H" % kmh

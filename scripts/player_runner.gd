@@ -9,6 +9,7 @@ signal jumped()
 signal slid()
 signal speed_updated(new_speed: float)
 signal boost_state_changed(is_boosting: bool)
+signal nitro_intensity_updated(factor: float)
 signal distance_updated(meters: float)
 signal crashed()
 
@@ -48,9 +49,12 @@ var box_shape: BoxShape3D
 var anim_player: AnimationPlayer
 var character_model: Node3D
 
-# Particles
+# Particles & Nitrous Thrusters
 var slide_spark_particles: CPUParticles3D
 var boost_trail_particles: CPUParticles3D
+var nitro_left_root: Node3D
+var nitro_right_root: Node3D
+var nitro_ground_light: OmniLight3D
 
 func _ready() -> void:
 	start_z = global_position.z
@@ -96,6 +100,79 @@ func _setup_visuals() -> void:
 	boost_trail_particles = _create_boost_particles()
 	visuals_root.add_child(boost_trail_particles)
 
+	# Twin Nitrous Plasma Burners & Ground Glow
+	_setup_nitrous_thrusters()
+
+func _setup_nitrous_thrusters() -> void:
+	# Material: Outer Electric Cyan Nitrous Flame
+	var outer_mat := StandardMaterial3D.new()
+	outer_mat.albedo_color = Color(0.0, 0.85, 1.0)
+	outer_mat.emission_enabled = true
+	outer_mat.emission = Color(0.0, 0.85, 1.0)
+	outer_mat.emission_energy_multiplier = 4.2
+	outer_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	# Material: Inner Superheated White Core
+	var core_mat := StandardMaterial3D.new()
+	core_mat.albedo_color = Color(0.9, 0.98, 1.0)
+	core_mat.emission_enabled = true
+	core_mat.emission = Color(0.9, 0.98, 1.0)
+	core_mat.emission_energy_multiplier = 6.0
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var flame_len: float = 0.65
+	var flame_mesh := BoxMesh.new()
+	flame_mesh.size = Vector3(0.09, 0.09, flame_len)
+
+	var core_len: float = 0.4
+	var core_mesh := BoxMesh.new()
+	core_mesh.size = Vector3(0.04, 0.04, core_len)
+
+	# Left Thruster Nozzle Root (Positioned at runner hip/backpack)
+	nitro_left_root = Node3D.new()
+	nitro_left_root.position = Vector3(-0.2, 0.72, 0.35)
+	nitro_left_root.scale = Vector3.ZERO
+	visuals_root.add_child(nitro_left_root)
+
+	var left_outer := MeshInstance3D.new()
+	left_outer.mesh = flame_mesh
+	left_outer.material_override = outer_mat
+	left_outer.position = Vector3(0, 0, flame_len * 0.5)
+	nitro_left_root.add_child(left_outer)
+
+	var left_core := MeshInstance3D.new()
+	left_core.mesh = core_mesh
+	left_core.material_override = core_mat
+	left_core.position = Vector3(0, 0, core_len * 0.5)
+	nitro_left_root.add_child(left_core)
+
+	# Right Thruster Nozzle Root
+	nitro_right_root = Node3D.new()
+	nitro_right_root.position = Vector3(0.2, 0.72, 0.35)
+	nitro_right_root.scale = Vector3.ZERO
+	visuals_root.add_child(nitro_right_root)
+
+	var right_outer := MeshInstance3D.new()
+	right_outer.mesh = flame_mesh
+	right_outer.material_override = outer_mat
+	right_outer.position = Vector3(0, 0, flame_len * 0.5)
+	nitro_right_root.add_child(right_outer)
+
+	var right_core := MeshInstance3D.new()
+	right_core.mesh = core_mesh
+	right_core.material_override = core_mat
+	right_core.position = Vector3(0, 0, core_len * 0.5)
+	nitro_right_root.add_child(right_core)
+
+	# Nitrous Dynamic Ground Glow Light
+	nitro_ground_light = OmniLight3D.new()
+	nitro_ground_light.position = Vector3(0, 0.5, 0.7)
+	nitro_ground_light.light_color = Color(0.0, 0.85, 1.0)
+	nitro_ground_light.light_energy = 0.0
+	nitro_ground_light.omni_range = 6.5
+	nitro_ground_light.omni_attenuation = 1.3
+	visuals_root.add_child(nitro_ground_light)
+
 func _create_spark_particles() -> CPUParticles3D:
 	var parts := CPUParticles3D.new()
 	parts.position = Vector3(0, 0.05, 0)
@@ -125,27 +202,27 @@ func _create_spark_particles() -> CPUParticles3D:
 
 func _create_boost_particles() -> CPUParticles3D:
 	var parts := CPUParticles3D.new()
-	parts.position = Vector3(0, 0.65, 0.4)
+	parts.position = Vector3(0, 0.72, 0.42)
 	parts.emitting = false
-	parts.amount = 22
-	parts.lifetime = 0.22
+	parts.amount = 40
+	parts.lifetime = 0.18
 	parts.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	parts.emission_box_extents = Vector3(0.2, 0.3, 0.1)
+	parts.emission_box_extents = Vector3(0.25, 0.15, 0.08)
 	parts.gravity = Vector3(0, 0, 0)
-	parts.direction = Vector3(0, 0.1, 1.0)
-	parts.spread = 12.0
-	parts.initial_velocity_min = 8.0
-	parts.initial_velocity_max = 14.0
+	parts.direction = Vector3(0, 0.05, 1.0)
+	parts.spread = 10.0
+	parts.initial_velocity_min = 16.0
+	parts.initial_velocity_max = 24.0
 	parts.scale_amount_min = 0.04
-	parts.scale_amount_max = 0.08
+	parts.scale_amount_max = 0.09
 
 	var p_mesh := BoxMesh.new()
-	p_mesh.size = Vector3(0.03, 0.03, 0.16)
+	p_mesh.size = Vector3(0.03, 0.03, 0.28)
 	var p_mat := StandardMaterial3D.new()
-	p_mat.albedo_color = Color(0.1, 0.95, 1.0)
+	p_mat.albedo_color = Color(0.15, 0.95, 1.0)
 	p_mat.emission_enabled = true
-	p_mat.emission = Color(0.1, 0.95, 1.0)
-	p_mat.emission_energy_multiplier = 2.8
+	p_mat.emission = Color(0.15, 0.95, 1.0)
+	p_mat.emission_energy_multiplier = 3.8
 	parts.mesh = p_mesh
 	parts.material_override = p_mat
 	return parts
@@ -236,6 +313,10 @@ func _physics_process(delta: float) -> void:
 	speed_updated.emit(forward_speed)
 	distance_updated.emit(distance_traveled)
 
+	var nitro_factor: float = clampf(boost_amount / BOOST_EXTRA_SPEED, 0.0, 1.0)
+	nitro_intensity_updated.emit(nitro_factor)
+	_update_nitrous_thrusters(delta, nitro_factor)
+
 	if boost_trail_particles:
 		boost_trail_particles.emitting = is_boosting and is_alive
 
@@ -266,6 +347,26 @@ func _physics_process(delta: float) -> void:
 
 	# 7. Procedural Animations and Skeleton Blend
 	_update_character_animation(delta)
+
+func _update_nitrous_thrusters(delta: float, factor: float) -> void:
+	var is_active: bool = factor > 0.04 and is_alive and not is_sliding
+
+	if is_active:
+		# Rapid combustion flicker for high-power nitrous plasma
+		var flicker: float = randf_range(0.88, 1.14)
+		var flame_scale := Vector3(factor * flicker, factor * flicker, factor * flicker * 1.35)
+		if nitro_left_root: nitro_left_root.scale = flame_scale
+		if nitro_right_root: nitro_right_root.scale = flame_scale
+		if nitro_ground_light:
+			nitro_ground_light.light_energy = lerp(nitro_ground_light.light_energy, factor * 2.8, delta * 24.0)
+	else:
+		if nitro_left_root: nitro_left_root.scale = Vector3.ZERO
+		if nitro_right_root: nitro_right_root.scale = Vector3.ZERO
+		if nitro_ground_light:
+			nitro_ground_light.light_energy = lerp(nitro_ground_light.light_energy, 0.0, delta * 16.0)
+
+func get_nitro_factor() -> float:
+	return clampf(boost_amount / BOOST_EXTRA_SPEED, 0.0, 1.0)
 
 func _update_character_animation(delta: float) -> void:
 	if visuals_root == null:
@@ -310,6 +411,10 @@ func _trigger_crash(reason: String = "obstacle") -> void:
 		return
 	is_alive = false
 	is_boosting = false
+	if nitro_left_root: nitro_left_root.scale = Vector3.ZERO
+	if nitro_right_root: nitro_right_root.scale = Vector3.ZERO
+	if nitro_ground_light: nitro_ground_light.light_energy = 0.0
+	nitro_intensity_updated.emit(0.0)
 	if boost_trail_particles:
 		boost_trail_particles.emitting = false
 	if anim_player and anim_player.has_animation("die"):

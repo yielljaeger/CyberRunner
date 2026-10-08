@@ -36,16 +36,31 @@ func _process(delta: float) -> void:
 	var target_y: float = p_pos.y + OFFSET_Y
 	current_cam_y = lerp(current_cam_y, target_y, delta * 7.0)
 
-	# 3. Direct Z tracking (perfect lock for zero jitter)
+	# 3. Direct Z tracking (perfect lock for zero jitter) + Nitrous Kinetic Micro-Shake
 	var target_z: float = p_pos.z + OFFSET_Z
 
-	global_position = Vector3(current_cam_x, current_cam_y, target_z)
+	var nitro_factor: float = 0.0
+	if player.has_method("get_nitro_factor"):
+		nitro_factor = float(player.call("get_nitro_factor"))
+	elif "boost_amount" in player:
+		nitro_factor = clampf(float(player.get("boost_amount")) / 16.0, 0.0, 1.0)
+
+	var nitro_shake := Vector3.ZERO
+	if nitro_factor > 0.05 and ("is_alive" in player and player.get("is_alive")):
+		var shake_mag: float = nitro_factor * 0.018
+		nitro_shake = Vector3(
+			randf_range(-shake_mag, shake_mag),
+			randf_range(-shake_mag, shake_mag),
+			0.0
+		)
+
+	global_position = Vector3(current_cam_x, current_cam_y, target_z) + nitro_shake
 
 	# 4. Look ahead along the track
 	var look_target := Vector3(p_pos.x * 0.3, p_pos.y + LOOK_AHEAD_Y, p_pos.z + LOOK_AHEAD_Z)
 	look_at(look_target, Vector3.UP)
 
-	# 5. Dynamic FOV kick based on player speed
+	# 5. Dynamic FOV kick: Base speed + Nitrous Surge kick (smooth and comfortable)
 	if "is_alive" in player and player.get("is_alive"):
 		var f_val = player.get("forward_speed")
 		var b_val = player.get("BASE_FORWARD_SPEED")
@@ -54,8 +69,8 @@ func _process(delta: float) -> void:
 		var base_spd: float = float(b_val) if b_val != null else 24.0
 		var max_spd: float = float(m_val) if m_val != null else 66.0
 		var speed_factor: float = clampf((f_speed - base_spd) / maxf(max_spd - base_spd, 1.0), 0.0, 1.0)
-		var target_fov: float = lerp(BASE_FOV, MAX_FOV, speed_factor)
-		fov = lerp(fov, target_fov, delta * 4.0)
+		var target_fov: float = lerp(BASE_FOV, MAX_FOV, speed_factor) + (nitro_factor * 4.5)
+		fov = lerp(fov, target_fov, delta * 6.0)
 
 	# 6. Subtle camera roll on lane shift
 	var x_velocity: float = player.velocity.x
