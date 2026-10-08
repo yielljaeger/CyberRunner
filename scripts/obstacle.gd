@@ -294,77 +294,83 @@ func _build_stop_sign(pos: Vector3) -> void:
 	bracket.position = Vector3(pos.x, 2.18, 0.04)
 	add_child(bracket)
 
-	# 2. Outer Red Octagon Plate (8-sided regular cylinder rotated forward)
+	# Octagon Basis: Cylinder cap rotated 90° forward into X-Y plane, then spun 22.5° around Z
+	# This guarantees ALL vertices lie strictly on a flat, parallel plane with ZERO yaw/pitch tilt!
+	var oct_basis: Basis = Basis(Vector3.FORWARD, deg_to_rad(22.5)) * Basis(Vector3.RIGHT, deg_to_rad(90.0))
+
+	# 2. Outer Red Octagon Plate (8-sided regular cylinder)
 	var sign_mesh := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.42
-	cyl.bottom_radius = 0.42
+	cyl.top_radius = 0.45
+	cyl.bottom_radius = 0.45
 	cyl.height = 0.04
 	cyl.radial_segments = 8
 	cyl.rings = 1
 	sign_mesh.mesh = cyl
 	sign_mesh.material_override = stop_sign_red_mat
-	sign_mesh.rotation_degrees = Vector3(90.0, 22.5, 0.0)
+	sign_mesh.transform.basis = oct_basis
 	sign_mesh.position = pos
 	add_child(sign_mesh)
 
 	# 3. Inner White Octagon Border
 	var border_mesh := MeshInstance3D.new()
 	var b_cyl := CylinderMesh.new()
-	b_cyl.top_radius = 0.38
-	b_cyl.bottom_radius = 0.38
+	b_cyl.top_radius = 0.41
+	b_cyl.bottom_radius = 0.41
 	b_cyl.height = 0.044
 	b_cyl.radial_segments = 8
 	b_cyl.rings = 1
 	border_mesh.mesh = b_cyl
 	border_mesh.material_override = stop_sign_white_mat
-	border_mesh.rotation_degrees = Vector3(90.0, 22.5, 0.0)
+	border_mesh.transform.basis = oct_basis
 	border_mesh.position = pos
 	add_child(border_mesh)
 
 	# 4. Inner Red Octagon Core
 	var core_mesh := MeshInstance3D.new()
 	var c_cyl := CylinderMesh.new()
-	c_cyl.top_radius = 0.35
-	c_cyl.bottom_radius = 0.35
+	c_cyl.top_radius = 0.38
+	c_cyl.bottom_radius = 0.38
 	c_cyl.height = 0.048
 	c_cyl.radial_segments = 8
 	c_cyl.rings = 1
 	core_mesh.mesh = c_cyl
 	core_mesh.material_override = stop_sign_red_mat
-	core_mesh.rotation_degrees = Vector3(90.0, 22.5, 0.0)
+	core_mesh.transform.basis = oct_basis
 	core_mesh.position = pos
 	add_child(core_mesh)
 
 	# 5. Bold High-Contrast "STOP" Text Labels (Facing Front and Back)
-	# Front label faces oncoming runner (+Z)
+	# Front label faces oncoming runner (+Z) with high priority layer rendering
 	var front_label := Label3D.new()
 	front_label.text = "STOP"
-	front_label.font_size = 58
+	front_label.font_size = 50
 	front_label.pixel_size = 0.005
 	front_label.modulate = Color(1.0, 1.0, 1.0)
-	front_label.outline_size = 14
+	front_label.outline_size = 10
 	front_label.outline_modulate = Color(0.12, 0.12, 0.12)
 	front_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	front_label.double_sided = false
 	front_label.no_depth_test = false
-	front_label.render_priority = 2
-	front_label.position = pos + Vector3(0, 0, 0.028)
+	front_label.render_priority = 10
+	front_label.sorting_offset = 2.0
+	front_label.position = pos + Vector3(0, 0, 0.032)
 	add_child(front_label)
 
 	# Back label faces away (-Z)
 	var back_label := Label3D.new()
 	back_label.text = "STOP"
-	back_label.font_size = 58
+	back_label.font_size = 50
 	back_label.pixel_size = 0.005
 	back_label.modulate = Color(1.0, 1.0, 1.0)
-	back_label.outline_size = 14
+	back_label.outline_size = 10
 	back_label.outline_modulate = Color(0.12, 0.12, 0.12)
 	back_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	back_label.double_sided = false
 	back_label.no_depth_test = false
-	back_label.render_priority = 2
-	back_label.position = pos + Vector3(0, 0, -0.028)
+	back_label.render_priority = 10
+	back_label.sorting_offset = 2.0
+	back_label.position = pos + Vector3(0, 0, -0.032)
 	back_label.rotation_degrees = Vector3(0, 180, 0)
 	add_child(back_label)
 
