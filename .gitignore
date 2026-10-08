@@ -1,3 +1,4 @@
-﻿.godot/
+.godot/
 *.tmp
 *.exe
+backup/
