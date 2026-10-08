@@ -47,10 +47,13 @@ func _process(delta: float) -> void:
 
 	# 5. Dynamic FOV kick based on player speed
 	if "is_alive" in player and player.get("is_alive"):
-		var f_speed: float = float(player.get("forward_speed"))
-		var base_spd: float = float(player.get("BASE_FORWARD_SPEED"))
-		var max_spd: float = float(player.get("MAX_FORWARD_SPEED"))
-		var speed_factor: float = clampf((f_speed - base_spd) / (max_spd - base_spd), 0.0, 1.0)
+		var f_val = player.get("forward_speed")
+		var b_val = player.get("BASE_FORWARD_SPEED")
+		var m_val = player.get("MAX_FORWARD_SPEED")
+		var f_speed: float = float(f_val) if f_val != null else 24.0
+		var base_spd: float = float(b_val) if b_val != null else 24.0
+		var max_spd: float = float(m_val) if m_val != null else 66.0
+		var speed_factor: float = clampf((f_speed - base_spd) / maxf(max_spd - base_spd, 1.0), 0.0, 1.0)
 		var target_fov: float = lerp(BASE_FOV, MAX_FOV, speed_factor)
 		fov = lerp(fov, target_fov, delta * 4.0)
 

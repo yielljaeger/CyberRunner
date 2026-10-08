@@ -48,12 +48,12 @@ func _setup_cyber_environment() -> void:
 		env.ambient_light_sky_contribution = 0.5
 		env.ambient_light_energy = 0.9
 
-		# Subtle, Controlled Glow (High threshold prevents whole road from glowing)
+		# Balanced Cyberpunk Glow (Accentuate neon strips while keeping tarmac crisp)
 		env.glow_enabled = true
-		env.glow_intensity = 0.5
-		env.glow_strength = 0.8
-		env.glow_bloom = 0.06
-		env.glow_hdr_threshold = 1.2
+		env.glow_intensity = 0.65
+		env.glow_strength = 0.92
+		env.glow_bloom = 0.1
+		env.glow_hdr_threshold = 1.1
 		env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 
 		# Soft Atmospheric Depth Fog
@@ -79,6 +79,8 @@ func _connect_signals() -> void:
 	if player and hud:
 		if player.has_signal("speed_updated") and hud.has_method("update_speed"):
 			player.connect("speed_updated", Callable(hud, "update_speed"))
+		if player.has_signal("boost_state_changed") and hud.has_method("set_boosting"):
+			player.connect("boost_state_changed", Callable(hud, "set_boosting"))
 		if player.has_signal("distance_updated") and hud.has_method("update_distance"):
 			player.connect("distance_updated", Callable(hud, "update_distance"))
 		if player.has_signal("crashed"):

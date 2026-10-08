@@ -68,7 +68,7 @@ func _build_ui() -> void:
 	controls_label.offset_top = -60.0
 	controls_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	controls_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	controls_label.text = "[A / D] SWITCH LANE    |    [SPACE / W] JUMP    |    [S] SLIDE / DIVE    |    [R] RESTART"
+	controls_label.text = "[A / D] SWITCH LANE    |    [W] BOOST SPEED    |    [SPACE] JUMP    |    [S] SLIDE / DIVE    |    [R] RESTART"
 	controls_label.add_theme_font_size_override("font_size", 16)
 	controls_label.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0, 0.85))
 	controls_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.1, 0.3, 0.9))
@@ -127,11 +127,33 @@ func _build_ui() -> void:
 
 	root.add_child(game_over_panel)
 
+var is_boosting: bool = false
+var cached_speed: float = 24.0
+
+func set_boosting(boosting: bool) -> void:
+	is_boosting = boosting
+	_refresh_speed_display()
+
 func update_speed(speed: float) -> void:
-	# Convert units/sec to approximate KM/H for arcade feel (e.g. * 3.6)
-	var kmh: int = int(speed * 3.6)
-	if speed_label:
+	cached_speed = speed
+	_refresh_speed_display()
+
+func _refresh_speed_display() -> void:
+	if speed_label == null:
+		return
+	var kmh: int = int(cached_speed * 3.6)
+	if is_boosting:
+		speed_label.text = "SPEED: %03d KM/H  [BOOST]" % kmh
+		speed_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+		if status_label:
+			status_label.text = "SYS: OVERDRIVE [W]"
+			status_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
+	else:
 		speed_label.text = "SPEED: %03d KM/H" % kmh
+		speed_label.add_theme_color_override("font_color", Color(0.1, 0.9, 1.0))
+		if status_label:
+			status_label.text = "SYS: ONLINE [P1]"
+			status_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
 
 func update_distance(meters: float) -> void:
 	if distance_label:

@@ -8,14 +8,19 @@ signal lane_changed(new_lane: int)
 signal jumped()
 signal slid()
 signal speed_updated(new_speed: float)
+signal boost_state_changed(is_boosting: bool)
 signal distance_updated(meters: float)
 signal crashed()
 
 # Movement Constants
 const LANE_WIDTH: float = 3.2
 const BASE_FORWARD_SPEED: float = 24.0
-const MAX_FORWARD_SPEED: float = 52.0
-const SPEED_RAMP_RATE: float = 0.35 # Increase speed per 100 meters
+const MAX_BASE_FORWARD_SPEED: float = 50.0
+const MAX_FORWARD_SPEED: float = 66.0 # Max possible velocity with ramp + boost
+const BOOST_EXTRA_SPEED: float = 16.0 # Extra speed when W is held (24 -> 40+ m/s, ~145 km/h)
+const BOOST_ACCEL_RATE: float = 24.0 # Responsive acceleration into boost
+const BOOST_DECEL_RATE: float = 14.0 # Smooth deceleration when W is released
+const SPEED_RAMP_RATE: float = 0.35 # Increase base speed per 100 meters
 const LANE_SWITCH_SPEED: float = 20.0
 const JUMP_VELOCITY: float = 14.0
 const GRAVITY: float = 38.0
@@ -26,6 +31,8 @@ const SLIDE_DURATION: float = 0.55
 var current_lane: int = 0
 var target_x: float = 0.0
 var forward_speed: float = BASE_FORWARD_SPEED
+var boost_amount: float = 0.0
+var is_boosting: bool = false
 var distance_traveled: float = 0.0
 var start_z: float = 0.0
 
@@ -41,8 +48,9 @@ var box_shape: BoxShape3D
 var anim_player: AnimationPlayer
 var character_model: Node3D
 
-# Friction sparks only during active ground slide
+# Particles
 var slide_spark_particles: CPUParticles3D
+var boost_trail_particles: CPUParticles3D
 
 func _ready() -> void:
 	start_z = global_position.z
@@ -84,6 +92,10 @@ func _setup_visuals() -> void:
 	slide_spark_particles = _create_spark_particles()
 	visuals_root.add_child(slide_spark_particles)
 
+	# Aerodynamic boost speed particles (active when holding W)
+	boost_trail_particles = _create_boost_particles()
+	visuals_root.add_child(boost_trail_particles)
+
 func _create_spark_particles() -> CPUParticles3D:
 	var parts := CPUParticles3D.new()
 	parts.position = Vector3(0, 0.05, 0)
@@ -107,6 +119,33 @@ func _create_spark_particles() -> CPUParticles3D:
 	p_mat.emission_enabled = true
 	p_mat.emission = Color(1.0, 0.7, 0.1)
 	p_mat.emission_energy_multiplier = 1.5
+	parts.mesh = p_mesh
+	parts.material_override = p_mat
+	return parts
+
+func _create_boost_particles() -> CPUParticles3D:
+	var parts := CPUParticles3D.new()
+	parts.position = Vector3(0, 0.65, 0.4)
+	parts.emitting = false
+	parts.amount = 22
+	parts.lifetime = 0.22
+	parts.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	parts.emission_box_extents = Vector3(0.2, 0.3, 0.1)
+	parts.gravity = Vector3(0, 0, 0)
+	parts.direction = Vector3(0, 0.1, 1.0)
+	parts.spread = 12.0
+	parts.initial_velocity_min = 8.0
+	parts.initial_velocity_max = 14.0
+	parts.scale_amount_min = 0.04
+	parts.scale_amount_max = 0.08
+
+	var p_mesh := BoxMesh.new()
+	p_mesh.size = Vector3(0.03, 0.03, 0.16)
+	var p_mat := StandardMaterial3D.new()
+	p_mat.albedo_color = Color(0.1, 0.95, 1.0)
+	p_mat.emission_enabled = true
+	p_mat.emission = Color(0.1, 0.95, 1.0)
+	p_mat.emission_energy_multiplier = 2.8
 	parts.mesh = p_mesh
 	parts.material_override = p_mat
 	return parts
@@ -177,11 +216,28 @@ func _physics_process(delta: float) -> void:
 	if not is_alive:
 		return
 
-	# 1. Forward Speed Ramping
+	# 1. Forward Speed Ramping and W Key Speed Boost
 	distance_traveled = abs(global_position.z - start_z)
-	forward_speed = clampf(BASE_FORWARD_SPEED + (distance_traveled / 100.0) * SPEED_RAMP_RATE, BASE_FORWARD_SPEED, MAX_FORWARD_SPEED)
+	var base_speed: float = clampf(BASE_FORWARD_SPEED + (distance_traveled / 100.0) * SPEED_RAMP_RATE, BASE_FORWARD_SPEED, MAX_BASE_FORWARD_SPEED)
+
+	# When player presses/holds W, accelerate forward speed
+	var wants_boost: bool = (Input.is_action_pressed("boost") or Input.is_key_pressed(KEY_W)) and not is_sliding
+	if wants_boost:
+		boost_amount = move_toward(boost_amount, BOOST_EXTRA_SPEED, delta * BOOST_ACCEL_RATE)
+	else:
+		boost_amount = move_toward(boost_amount, 0.0, delta * BOOST_DECEL_RATE)
+
+	var active_boost: bool = (boost_amount > 1.0)
+	if active_boost != is_boosting:
+		is_boosting = active_boost
+		boost_state_changed.emit(is_boosting)
+
+	forward_speed = base_speed + boost_amount
 	speed_updated.emit(forward_speed)
 	distance_updated.emit(distance_traveled)
+
+	if boost_trail_particles:
+		boost_trail_particles.emitting = is_boosting and is_alive
 
 	velocity.z = -forward_speed
 
@@ -242,14 +298,20 @@ func _update_character_animation(delta: float) -> void:
 			# Running on track
 			if anim_player.current_animation != "sprint":
 				anim_player.play("sprint")
-			anim_player.speed_scale = clampf(forward_speed / 18.0, 1.0, 2.2)
+			# Sprint animation cadence scales smoothly with boosted forward speed
+			anim_player.speed_scale = clampf(forward_speed / 16.0, 1.0, 2.6)
 			visuals_root.position.y = lerp(visuals_root.position.y, 0.0, delta * 15.0)
-			visuals_root.rotation.x = lerp_angle(visuals_root.rotation.x, 0.08, delta * 12.0)
+			# Aerodynamic forward lean when boosting
+			var target_pitch: float = 0.16 if is_boosting else 0.08
+			visuals_root.rotation.x = lerp_angle(visuals_root.rotation.x, target_pitch, delta * 12.0)
 
 func _trigger_crash(reason: String = "obstacle") -> void:
 	if not is_alive:
 		return
 	is_alive = false
+	is_boosting = false
+	if boost_trail_particles:
+		boost_trail_particles.emitting = false
 	if anim_player and anim_player.has_animation("die"):
 		anim_player.play("die")
 	if slide_spark_particles:
