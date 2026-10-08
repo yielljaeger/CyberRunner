@@ -48,7 +48,8 @@ func _spawn_next_chunk() -> void:
 	chunk.position = Vector3(0, 0, chunk_center_z)
 
 	var spawn_arch: bool = (chunk_counter > 2 and chunk_counter % 3 == 0)
-	chunk.setup_chunk(chunk_counter, spawn_arch)
+	var current_dist: float = abs(player.global_position.z) if player else 0.0
+	chunk.setup_chunk(chunk_counter, spawn_arch, current_dist)
 
 	active_chunks.append(chunk)
 

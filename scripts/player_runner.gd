@@ -2,6 +2,8 @@ extends CharacterBody3D
 class_name PlayerRunner
 
 const AssetLoader = preload("res://scripts/asset_loader.gd")
+const ObstacleScript = preload("res://scripts/obstacle.gd")
+const CollectibleScript = preload("res://scripts/collectible.gd")
 
 # Signals
 signal lane_changed(new_lane: int)
@@ -11,6 +13,11 @@ signal speed_updated(new_speed: float)
 signal boost_state_changed(is_boosting: bool)
 signal nitro_intensity_updated(factor: float)
 signal distance_updated(meters: float)
+signal score_updated(new_score: int)
+signal cores_updated(new_cores: int)
+signal tier_updated(new_tier: int, multiplier: float)
+signal powerup_status_updated(shield: bool, overdrive_time: float, magnet_time: float)
+signal obstacle_smashed()
 signal crashed()
 
 # Movement Constants
@@ -42,10 +49,29 @@ var is_sliding: bool = false
 var slide_timer: float = 0.0
 var is_alive: bool = true
 
+# Power-ups & Upgrades
+var has_shield: bool = false
+var shield_bubble: MeshInstance3D
+var overdrive_timer: float = 0.0
+var is_overdrive: bool = false
+var magnet_timer: float = 0.0
+var is_magnet: bool = false
+var invulnerable_timer: float = 0.0
+
+# Score, Cores & Difficulty Tier ("gets harder every 10k")
+var score: int = 0
+var cores_collected: int = 0
+var difficulty_tier: int = 0
+var difficulty_multiplier: float = 1.0
+var distance_score_acc: float = 0.0
+
 # Node references
 var visuals_root: Node3D
 var collision_shape: CollisionShape3D
 var box_shape: BoxShape3D
+var hurtbox: Area3D
+var hurtbox_shape: CollisionShape3D
+var hurtbox_box: BoxShape3D
 var anim_player: AnimationPlayer
 var character_model: Node3D
 
@@ -72,6 +98,22 @@ func _setup_collision() -> void:
 	box_shape.size = Vector3(1.0, 1.8, 1.0)
 	collision_shape.shape = box_shape
 	collision_shape.position = Vector3(0, 0.9, 0)
+
+	# Dedicated Player Hurtbox Area3D
+	hurtbox = Area3D.new()
+	hurtbox.name = "PlayerHurtbox"
+	hurtbox.collision_layer = 2 # Player
+	hurtbox.collision_mask = 4 + 8 # Obstacles (4) and Collectibles (8)
+	add_child(hurtbox)
+
+	hurtbox_shape = CollisionShape3D.new()
+	hurtbox_box = BoxShape3D.new()
+	hurtbox_box.size = Vector3(0.9, 1.7, 0.8)
+	hurtbox_shape.shape = hurtbox_box
+	hurtbox_shape.position = Vector3(0, 0.85, 0)
+	hurtbox.add_child(hurtbox_shape)
+
+	hurtbox.area_entered.connect(_on_hurtbox_area_entered)
 
 func _setup_visuals() -> void:
 	visuals_root = Node3D.new()
@@ -102,6 +144,29 @@ func _setup_visuals() -> void:
 
 	# Twin Nitrous Plasma Burners & Ground Glow
 	_setup_nitrous_thrusters()
+
+	# Cyber Shield Holographic Bubble
+	_setup_shield_bubble()
+
+func _setup_shield_bubble() -> void:
+	shield_bubble = MeshInstance3D.new()
+	shield_bubble.name = "ShieldBubble"
+	var sm := SphereMesh.new()
+	sm.radius = 1.35
+	sm.height = 2.7
+	shield_bubble.mesh = sm
+
+	var s_mat := StandardMaterial3D.new()
+	s_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	s_mat.albedo_color = Color(0.0, 0.85, 1.0, 0.28)
+	s_mat.emission_enabled = true
+	s_mat.emission = Color(0.0, 0.85, 1.0)
+	s_mat.emission_energy_multiplier = 2.5
+	s_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shield_bubble.material_override = s_mat
+	shield_bubble.position = Vector3(0, 0.9, 0)
+	shield_bubble.visible = false
+	visuals_root.add_child(shield_bubble)
 
 func _setup_nitrous_thrusters() -> void:
 	# Material: Outer Electric Cyan Nitrous Flame
@@ -274,6 +339,9 @@ func _start_slide() -> void:
 	# Keep bottom of collision shape at 0.0 (height 0.8, center y = 0.4)
 	box_shape.size = Vector3(1.0, 0.8, 1.2)
 	collision_shape.position = Vector3(0, 0.4, 0)
+	if hurtbox_box and hurtbox_shape:
+		hurtbox_box.size = Vector3(0.9, 0.72, 1.0)
+		hurtbox_shape.position = Vector3(0, 0.36, 0)
 	if slide_spark_particles:
 		slide_spark_particles.emitting = true
 	if anim_player and anim_player.has_animation("crouch"):
@@ -286,6 +354,9 @@ func _end_slide() -> void:
 	# Standing height 1.8, center y = 0.9 -> bottom is at 0.0
 	box_shape.size = Vector3(1.0, 1.8, 1.0)
 	collision_shape.position = Vector3(0, 0.9, 0)
+	if hurtbox_box and hurtbox_shape:
+		hurtbox_box.size = Vector3(0.9, 1.7, 0.8)
+		hurtbox_shape.position = Vector3(0, 0.85, 0)
 	if slide_spark_particles:
 		slide_spark_particles.emitting = false
 
@@ -293,9 +364,41 @@ func _physics_process(delta: float) -> void:
 	if not is_alive:
 		return
 
-	# 1. Forward Speed Ramping and W Key Speed Boost
+	# 1. Forward Speed Ramping, Tier Speed Boost, and W Key Speed Boost
 	distance_traveled = abs(global_position.z - start_z)
-	var base_speed: float = clampf(BASE_FORWARD_SPEED + (distance_traveled / 100.0) * SPEED_RAMP_RATE, BASE_FORWARD_SPEED, MAX_BASE_FORWARD_SPEED)
+
+	# Difficulty Tier Progression: increases every 10,000 meters!
+	var new_tier: int = int(distance_traveled / 10000.0)
+	if new_tier != difficulty_tier:
+		difficulty_tier = new_tier
+		difficulty_multiplier = 1.0 + float(difficulty_tier) * 1.0
+		tier_updated.emit(difficulty_tier, difficulty_multiplier)
+
+	var tier_speed_boost: float = float(difficulty_tier) * 3.5
+	var base_speed: float = clampf(BASE_FORWARD_SPEED + tier_speed_boost + (distance_traveled / 100.0) * SPEED_RAMP_RATE, BASE_FORWARD_SPEED, MAX_BASE_FORWARD_SPEED + tier_speed_boost)
+
+	# Power-up Timers & Active State
+	if invulnerable_timer > 0.0:
+		invulnerable_timer -= delta
+
+	if overdrive_timer > 0.0:
+		overdrive_timer -= delta
+		is_overdrive = true
+		if overdrive_timer <= 0.0:
+			is_overdrive = false
+			powerup_status_updated.emit(has_shield, 0.0, magnet_timer)
+	else:
+		is_overdrive = false
+
+	if magnet_timer > 0.0:
+		magnet_timer -= delta
+		is_magnet = true
+		_process_magnet_attraction(delta)
+		if magnet_timer <= 0.0:
+			is_magnet = false
+			powerup_status_updated.emit(has_shield, overdrive_timer, 0.0)
+	else:
+		is_magnet = false
 
 	# When player presses/holds W, accelerate forward speed
 	var wants_boost: bool = (Input.is_action_pressed("boost") or Input.is_key_pressed(KEY_W)) and not is_sliding
@@ -309,16 +412,27 @@ func _physics_process(delta: float) -> void:
 		is_boosting = active_boost
 		boost_state_changed.emit(is_boosting)
 
-	forward_speed = base_speed + boost_amount
+	var overdrive_extra: float = 16.0 if is_overdrive else 0.0
+	forward_speed = base_speed + boost_amount + overdrive_extra
 	speed_updated.emit(forward_speed)
 	distance_updated.emit(distance_traveled)
 
+	# Continuous Distance Score
+	distance_score_acc += delta * forward_speed * 8.0 * difficulty_multiplier
+	if distance_score_acc >= 1.0:
+		var add_pts: int = int(distance_score_acc)
+		score += add_pts
+		distance_score_acc -= float(add_pts)
+		score_updated.emit(score)
+
 	var nitro_factor: float = clampf(boost_amount / BOOST_EXTRA_SPEED, 0.0, 1.0)
+	if is_overdrive:
+		nitro_factor = 1.0
 	nitro_intensity_updated.emit(nitro_factor)
 	_update_nitrous_thrusters(delta, nitro_factor)
 
 	if boost_trail_particles:
-		boost_trail_particles.emitting = is_boosting and is_alive
+		boost_trail_particles.emitting = (is_boosting or is_overdrive) and is_alive
 
 	velocity.z = -forward_speed
 
@@ -348,11 +462,87 @@ func _physics_process(delta: float) -> void:
 	# 7. Procedural Animations and Skeleton Blend
 	_update_character_animation(delta)
 
+func _process_magnet_attraction(delta: float) -> void:
+	var collectibles = get_tree().get_nodes_in_group("collectible")
+	var p_pos = global_position + Vector3(0, 0.8, 0)
+	for item in collectibles:
+		if is_instance_valid(item) and item is CollectibleScript:
+			if item.global_position.distance_to(p_pos) < 15.0:
+				item.attract_towards(p_pos, delta)
+
+func activate_shield() -> void:
+	has_shield = true
+	if shield_bubble:
+		shield_bubble.visible = true
+	powerup_status_updated.emit(has_shield, overdrive_timer, magnet_timer)
+
+func activate_overdrive(duration: float = 6.0) -> void:
+	overdrive_timer = duration
+	is_overdrive = true
+	powerup_status_updated.emit(has_shield, overdrive_timer, magnet_timer)
+
+func activate_magnet(duration: float = 8.0) -> void:
+	magnet_timer = duration
+	is_magnet = true
+	powerup_status_updated.emit(has_shield, overdrive_timer, magnet_timer)
+
+func _on_hurtbox_area_entered(area: Area3D) -> void:
+	if not is_alive:
+		return
+
+	if area is ObstacleScript:
+		_handle_obstacle_collision(area)
+	elif area is CollectibleScript:
+		_handle_collectible_collision(area)
+
+func _handle_obstacle_collision(obs: Area3D) -> void:
+	if invulnerable_timer > 0.0:
+		return
+
+	if is_overdrive:
+		# Overdrive demolishes obstacles in the way!
+		if obs.has_method("smash"):
+			obs.smash()
+		score += int(500 * difficulty_multiplier)
+		score_updated.emit(score)
+		obstacle_smashed.emit()
+	elif has_shield:
+		# Shield absorbs impact!
+		has_shield = false
+		invulnerable_timer = 1.2
+		if shield_bubble:
+			shield_bubble.visible = false
+		powerup_status_updated.emit(has_shield, overdrive_timer, magnet_timer)
+		if obs.has_method("smash"):
+			obs.smash()
+	else:
+		# Crash!
+		_trigger_crash("hit_obstacle")
+
+func _handle_collectible_collision(item: Area3D) -> void:
+	if not ("item_type" in item):
+		return
+	match item.item_type:
+		CollectibleScript.CollectibleType.DATA_CORE:
+			cores_collected += 1
+			score += int(150 * difficulty_multiplier)
+			cores_updated.emit(cores_collected)
+			score_updated.emit(score)
+			item.collect()
+		CollectibleScript.CollectibleType.SHIELD:
+			activate_shield()
+			item.collect()
+		CollectibleScript.CollectibleType.OVERDRIVE:
+			activate_overdrive(6.0)
+			item.collect()
+		CollectibleScript.CollectibleType.MAGNET:
+			activate_magnet(8.0)
+			item.collect()
+
 func _update_nitrous_thrusters(delta: float, factor: float) -> void:
-	var is_active: bool = factor > 0.04 and is_alive and not is_sliding
+	var is_active: bool = (factor > 0.04 or is_overdrive) and is_alive and not is_sliding
 
 	if is_active:
-		# Rapid combustion flicker for high-power nitrous plasma
 		var flicker: float = randf_range(0.88, 1.14)
 		var flame_scale := Vector3(factor * flicker, factor * flicker, factor * flicker * 1.35)
 		if nitro_left_root: nitro_left_root.scale = flame_scale
@@ -366,6 +556,8 @@ func _update_nitrous_thrusters(delta: float, factor: float) -> void:
 			nitro_ground_light.light_energy = lerp(nitro_ground_light.light_energy, 0.0, delta * 16.0)
 
 func get_nitro_factor() -> float:
+	if is_overdrive:
+		return 1.0
 	return clampf(boost_amount / BOOST_EXTRA_SPEED, 0.0, 1.0)
 
 func _update_character_animation(delta: float) -> void:
@@ -376,13 +568,16 @@ func _update_character_animation(delta: float) -> void:
 	var target_roll: float = -velocity.x * 0.025
 	visuals_root.rotation.z = lerp_angle(visuals_root.rotation.z, target_roll, delta * 12.0)
 
+	# Rotate shield bubble if active
+	if has_shield and shield_bubble and shield_bubble.visible:
+		shield_bubble.rotate_y(delta * 2.5)
+
 	# Skeletal Animation State Machine
 	if anim_player:
 		if is_sliding:
 			if anim_player.current_animation != "crouch":
 				anim_player.play("crouch")
 			anim_player.speed_scale = 1.0
-			# Keep feet firmly on floor at y = 0.0 with NO clipping into floor!
 			visuals_root.position.y = lerp(visuals_root.position.y, 0.0, delta * 18.0)
 			visuals_root.rotation.x = lerp_angle(visuals_root.rotation.x, 0.0, delta * 18.0)
 		elif not is_on_floor():
@@ -399,11 +594,9 @@ func _update_character_animation(delta: float) -> void:
 			# Running on track
 			if anim_player.current_animation != "sprint":
 				anim_player.play("sprint")
-			# Sprint animation cadence scales smoothly with boosted forward speed
 			anim_player.speed_scale = clampf(forward_speed / 16.0, 1.0, 2.6)
 			visuals_root.position.y = lerp(visuals_root.position.y, 0.0, delta * 15.0)
-			# Aerodynamic forward lean when boosting
-			var target_pitch: float = 0.16 if is_boosting else 0.08
+			var target_pitch: float = 0.16 if (is_boosting or is_overdrive) else 0.08
 			visuals_root.rotation.x = lerp_angle(visuals_root.rotation.x, target_pitch, delta * 12.0)
 
 func _trigger_crash(reason: String = "obstacle") -> void:
@@ -411,6 +604,11 @@ func _trigger_crash(reason: String = "obstacle") -> void:
 		return
 	is_alive = false
 	is_boosting = false
+	is_overdrive = false
+	is_magnet = false
+	has_shield = false
+	if shield_bubble:
+		shield_bubble.visible = false
 	if nitro_left_root: nitro_left_root.scale = Vector3.ZERO
 	if nitro_right_root: nitro_right_root.scale = Vector3.ZERO
 	if nitro_ground_light: nitro_ground_light.light_energy = 0.0

@@ -85,6 +85,14 @@ func _connect_signals() -> void:
 			player.connect("nitro_intensity_updated", Callable(hud, "set_nitro_intensity"))
 		if player.has_signal("distance_updated") and hud.has_method("update_distance"):
 			player.connect("distance_updated", Callable(hud, "update_distance"))
+		if player.has_signal("score_updated") and hud.has_method("update_score"):
+			player.connect("score_updated", Callable(hud, "update_score"))
+		if player.has_signal("cores_updated") and hud.has_method("update_cores"):
+			player.connect("cores_updated", Callable(hud, "update_cores"))
+		if player.has_signal("tier_updated") and hud.has_method("update_tier"):
+			player.connect("tier_updated", Callable(hud, "update_tier"))
+		if player.has_signal("powerup_status_updated") and hud.has_method("update_powerups"):
+			player.connect("powerup_status_updated", Callable(hud, "update_powerups"))
 		if player.has_signal("crashed"):
 			player.connect("crashed", Callable(self, "_on_player_crashed"))
 
@@ -97,7 +105,10 @@ func _on_player_crashed() -> void:
 	is_game_over = true
 	if hud and hud.has_method("show_game_over"):
 		var dist: float = float(player.get("distance_traveled"))
-		hud.call("show_game_over", dist)
+		var sc: int = int(player.get("score"))
+		var cr: int = int(player.get("cores_collected"))
+		var tr: int = int(player.get("difficulty_tier"))
+		hud.call("show_game_over", dist, sc, cr, tr)
 
 func _restart_game() -> void:
 	get_tree().reload_current_scene()

@@ -1,6 +1,8 @@
 extends Node3D
 
 const AssetLoader = preload("res://scripts/asset_loader.gd")
+const ObstacleScript = preload("res://scripts/obstacle.gd")
+const CollectibleScript = preload("res://scripts/collectible.gd")
 
 const CHUNK_LENGTH: float = 40.0
 const CHUNK_WIDTH: float = 12.0
@@ -98,7 +100,7 @@ static func _init_shared_materials() -> void:
 	neon_billboard_mat.emission = Color(0.0, 0.75, 1.0)
 	neon_billboard_mat.emission_energy_multiplier = 2.2
 
-func setup_chunk(idx: int, spawn_arch: bool = false) -> void:
+func setup_chunk(idx: int, spawn_arch: bool = false, player_dist: float = 0.0) -> void:
 	chunk_index = idx
 	has_arch = spawn_arch
 
@@ -113,6 +115,7 @@ func setup_chunk(idx: int, spawn_arch: bool = false) -> void:
 		_build_overhead_gantry()
 
 	_build_distant_skyline()
+	_build_hazards_and_collectibles(player_dist)
 
 func _build_road_surface() -> void:
 	# Physics floor collision (covers exactly X: -6.0 to +6.0)
@@ -440,3 +443,107 @@ func _build_distant_skyline() -> void:
 				var ex_z: float = sp_z + (1.2 if side >= 0 else -1.2)
 				exhaust.position = Vector3(sp_x, sp_y + 0.2, ex_z)
 				add_child(exhaust)
+
+func _build_hazards_and_collectibles(player_dist: float) -> void:
+	var lane_coords: Array[float] = [-LANE_WIDTH, 0.0, LANE_WIDTH]
+
+	# Chunks 0 and 1 are a peaceful runway start (no obstacles)
+	if chunk_index <= 1:
+		for i in range(4):
+			var core = CollectibleScript.create(CollectibleScript.CollectibleType.DATA_CORE)
+			core.position = Vector3(0.0, 0.9, -15.0 + float(i) * 7.5)
+			add_child(core)
+		return
+
+	# Difficulty calculation (every 10,000m increases the tier)
+	var tier: int = int(player_dist / 10000.0)
+
+	# Decide hazard rows for this chunk
+	# Tier 0 (0-10k): 1 hazard row (at Z = -10.0)
+	# Tier 1 (10k-20k): 1 guaranteed row at Z = -10.0, 60% chance of 2nd row at Z = 10.0
+	# Tier 2+ (20k+): 2 guaranteed rows at Z = -10.0 and Z = 10.0
+	var hazard_z_list: Array[float] = [-10.0]
+	if tier >= 2:
+		hazard_z_list.append(10.0)
+	elif tier >= 1 and randf() < 0.6:
+		hazard_z_list.append(10.0)
+
+	for hz_z: float in hazard_z_list:
+		_spawn_hazard_row(hz_z, tier, lane_coords)
+
+	# Spawn Data Cores & Power-Ups along open routes
+	_spawn_collectibles_row(tier, lane_coords)
+
+func _spawn_hazard_row(z_pos: float, tier: int, lane_coords: Array[float]) -> void:
+	# Golden Rule: Never block all 3 lanes with impassable obstacles!
+	var safe_lane_idx: int = randi() % 3
+	var other_lanes: Array[int] = []
+	for i in range(3):
+		if i != safe_lane_idx:
+			other_lanes.append(i)
+
+	if tier == 0:
+		# Tier 0 (0 - 10k): 1 obstacle, 2 completely open lanes
+		var obs_lane: int = other_lanes[randi() % other_lanes.size()]
+		var obs_type = ObstacleScript.ObstacleType.LOW_HURDLE
+		var roll: float = randf()
+		if roll < 0.38:
+			obs_type = ObstacleScript.ObstacleType.LOW_HURDLE # Jump
+		elif roll < 0.72:
+			obs_type = ObstacleScript.ObstacleType.HIGH_GATE # Slide
+		else:
+			obs_type = ObstacleScript.ObstacleType.SOLID_BARRIER # Switch lane
+
+		var obs = ObstacleScript.create(obs_type)
+		obs.position = Vector3(lane_coords[obs_lane], 0.0, z_pos)
+		add_child(obs)
+
+		# If low hurdle, spawn jump arc of data cores over it to guide player!
+		if obs_type == ObstacleScript.ObstacleType.LOW_HURDLE and randf() < 0.65:
+			for k in range(3):
+				var core = CollectibleScript.create(CollectibleScript.CollectibleType.DATA_CORE)
+				var arc_y: float = 1.1 if (k != 1) else 1.85
+				core.position = Vector3(lane_coords[obs_lane], arc_y, z_pos - 3.0 + float(k) * 3.0)
+				add_child(core)
+
+	else:
+		# Tier 1+ (10k+): Multi-lane hazard combinations!
+		for lane_idx: int in other_lanes:
+			var roll: float = randf()
+			var obs_type = ObstacleScript.ObstacleType.LOW_HURDLE
+			if roll < 0.35:
+				obs_type = ObstacleScript.ObstacleType.LOW_HURDLE
+			elif roll < 0.70:
+				obs_type = ObstacleScript.ObstacleType.HIGH_GATE
+			else:
+				obs_type = ObstacleScript.ObstacleType.SOLID_BARRIER
+
+			var obs = ObstacleScript.create(obs_type)
+			obs.position = Vector3(lane_coords[lane_idx], 0.0, z_pos)
+			add_child(obs)
+
+func _spawn_collectibles_row(tier: int, lane_coords: Array[float]) -> void:
+	var c_lane: int = randi() % 3
+	var lane_x: float = lane_coords[c_lane]
+
+	# 1. Power-Up Spawn Chance (25% per chunk)
+	if randf() < 0.25:
+		var p_roll: float = randf()
+		var p_type = CollectibleScript.CollectibleType.SHIELD
+		if p_roll < 0.40:
+			p_type = CollectibleScript.CollectibleType.SHIELD
+		elif p_roll < 0.72:
+			p_type = CollectibleScript.CollectibleType.MAGNET
+		else:
+			p_type = CollectibleScript.CollectibleType.OVERDRIVE
+
+		var powerup = CollectibleScript.create(p_type)
+		powerup.position = Vector3(lane_x, 1.0, 0.0)
+		add_child(powerup)
+
+	# 2. Data Core string (3 crystals in line)
+	elif randf() < 0.50:
+		for i in range(3):
+			var core = CollectibleScript.create(CollectibleScript.CollectibleType.DATA_CORE)
+			core.position = Vector3(lane_x, 0.9, -6.0 + float(i) * 5.0)
+			add_child(core)
